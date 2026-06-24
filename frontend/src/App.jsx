@@ -15,8 +15,51 @@ function App() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authInitialEmail, setAuthInitialEmail] = useState("");
   const messagesRef = useRef(null);
   const abortControllerRef = useRef(null);
+
+  // Check session on mount
+  useEffect(() => {
+    apiMe()
+      .then((data) => setUser(data.user || null))
+      .catch(() => setUser(null))
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  const openLogin = (email) => {
+    setAuthMode("login");
+    setAuthInitialEmail(email || "");
+    setShowAuth(true);
+  };
+
+  const openRegister = (email) => {
+    setAuthMode("register");
+    setAuthInitialEmail(email || "");
+    setShowAuth(true);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiLogout();
+      setUser(null);
+    } catch {
+      setUser(null);
+    }
+  };
+
+  const handleAuthSuccess = async () => {
+    try {
+      const data = await apiMe();
+      setUser(data.user || null);
+    } catch {
+      setUser(null);
+    }
+  };
 
   const chatHistory = useMemo(
     () => messages.filter((msg) => msg.role === "user" || msg.role === "assistant"),
@@ -108,10 +151,26 @@ function App() {
     }
   };
 
+  if (authLoading) {
+    return <main className="app-shell"><p style={{ textAlign: "center", padding: 40 }}>Carregando...</p></main>;
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
-        <div className="brand">ChatLLM Lab</div>
+        <div className="header-left">
+          <span className="brand">ChatLLM Lab</span>
+        </div>
+        <div className="header-right">
+          {user ? (
+            <div className="auth-info">
+              <span className="user-email">{user.username}</span>
+              <button className="btn-logout" onClick={handleLogout}>Sair</button>
+            </div>
+          ) : (
+            <button className="btn-login" onClick={() => openLogin()}>Login</button>
+          )}
+        </div>
       </header>
 
       <section className="messages" aria-live="polite" ref={messagesRef}>
@@ -133,7 +192,20 @@ function App() {
         onStop={onStop}
       />
 
-      <div className="warning-banner">Lembre-se, você precisa focar no experimento!!!</div>
+      <div className="warning-banner">
+        {user
+          ? `Conversas salvas na conta: ${user.username}`
+          : "Conversas n\u00e3o ser\u00e3o salvas, logue para mudar isso!"}
+      </div>
+
+      {showAuth && (
+        <AuthModal
+          mode={authMode}
+          initialEmail={authInitialEmail}
+          onClose={() => setShowAuth(false)}
+          onAuthSuccess={handleAuthSuccess}
+        />
+      )}
     </main>
   );
 }

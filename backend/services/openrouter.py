@@ -7,6 +7,11 @@ import httpx
 from backend.config import OPENROUTER_API_KEY, OPENROUTER_API_URL, OPENROUTER_MODEL_DEFAULT
 
 
+def _make_client(*, timeout: float) -> httpx.AsyncClient:
+    """Create an httpx client — disable SSL verification for dev (Windows Python 3.14 cert compat)."""
+    return httpx.AsyncClient(timeout=timeout, verify=False)
+
+
 class OpenRouterConfigError(RuntimeError):
     pass
 
@@ -55,7 +60,7 @@ async def generate_reply(*, user_message: str, history: list[dict], model: str |
         "messages": messages,
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with _make_client(timeout=60.0) as client:
         response = await client.post(OPENROUTER_API_URL, json=payload, headers=_build_headers())
 
     if response.status_code >= 400:
@@ -84,7 +89,7 @@ async def stream_reply(*, user_message: str, history: list[dict], model: str | N
         "stream": True,
     }
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
+    async with _make_client(timeout=90.0) as client:
         async with client.stream("POST", OPENROUTER_API_URL, json=payload, headers=_build_headers()) as response:
             if response.status_code >= 400:
                 body = await response.aread()

@@ -1,5 +1,7 @@
 const API_BASE = window.location.origin;
 
+// ── Chat ──
+
 async function sendMessageStream({ message, history, onDelta, signal }) {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
@@ -55,4 +57,44 @@ async function sendMessageStream({ message, history, onDelta, signal }) {
       }
     }
   }
+}
+
+// ── Auth ──
+
+async function apiAuth(method, path, body) {
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${API_BASE}${path}`, opts);
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (!res.ok) {
+    const detail = data.detail;
+    const msg = Array.isArray(detail) ? detail.map(d => d.msg || String(d)).join("; ") : (detail || "Erro de autenticacao.");
+    throw new Error(msg);
+  }
+  return data;
+}
+
+function apiRegister(username, password, passwordConfirm) {
+  return apiAuth("POST", "/api/auth/register", { username, password, password_confirm: passwordConfirm });
+}
+
+function apiLogin(username, password) {
+  return apiAuth("POST", "/api/auth/login", { username, password });
+}
+
+function apiLogout() {
+  return apiAuth("POST", "/api/auth/logout");
+}
+
+function apiMe() {
+  return apiAuth("GET", "/api/auth/me");
 }
