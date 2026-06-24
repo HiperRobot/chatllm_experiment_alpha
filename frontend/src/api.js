@@ -1,19 +1,39 @@
 const API_BASE = window.location.origin;
 
+function formatChatError(status, detail) {
+  const rawDetail = typeof detail === "string" ? detail : JSON.stringify(detail || {});
+  const normalized = rawDetail.toLowerCase();
+
+  if (
+    status === 403 &&
+    (normalized.includes("key limit exceeded") ||
+      normalized.includes("total limit") ||
+      normalized.includes("credit") ||
+      normalized.includes("credits") ||
+      normalized.includes("quota"))
+  ) {
+    return "Os créditos acabaram. Tente novamente mais tarde ou revise sua chave do OpenRouter.";
+  }
+
+  return rawDetail || "Erro ao enviar mensagem para o servidor.";
+}
+
 // ── Chat ──
 
-async function sendMessageStream({ message, history, onDelta, signal }) {
+async function sendMessageStream({ message, history, onDelta, signal, sessionId, onDone }) {
+  const body = { message, history };
+  if (sessionId) body.session_id = sessionId;
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
+    credentials: "same-origin",
+    body: JSON.stringify(body),
     signal,
   });
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const detail = body?.detail || "Erro ao enviar mensagem para o servidor.";
-    throw new Error(detail);
+    throw new Error(formatChatError(response.status, body?.detail));
   }
 
   if (!response.body) {
@@ -49,11 +69,15 @@ async function sendMessageStream({ message, history, onDelta, signal }) {
       }
 
       if (payload.error) {
-        throw new Error(payload.error);
+        throw new Error(formatChatError(403, payload.error));
       }
 
       if (payload.delta) {
         onDelta(payload.delta);
+      }
+
+      if (payload.done && onDone) {
+        onDone(payload);
       }
     }
   }
@@ -97,4 +121,39 @@ function apiLogout() {
 
 function apiMe() {
   return apiAuth("GET", "/api/auth/me");
+}
+
+// ── Sessions ──
+
+async function apiSessions(method, path, body) {
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${API_BASE}/api/sessions${path}`, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Erro de sessao.");
+  return data;
+}
+
+function apiListSessions() {
+  return apiSessions("GET", "");
+}
+
+function apiCreateSession(title) {
+  return apiSessions("POST", "", title ? { title } : {});
+}
+
+function apiGetSession(sessionId) {
+  return apiSessions("GET", `/${sessionId}`);
+}
+
+function apiDeleteSession(sessionId) {
+  return apiSessions("DELETE", `/${sessionId}`);
+}
+
+function apiUpdateSession(sessionId, title) {
+  return apiSessions("PATCH", `/${sessionId}`, { title });
 }

@@ -1,4 +1,4 @@
-const { useEffect, useMemo, useRef, useState } = React;
+const { useEffect, useMemo, useRef, useState, useCallback } = React;
 
 function createMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -20,6 +20,9 @@ function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [authInitialEmail, setAuthInitialEmail] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesRef = useRef(null);
   const abortControllerRef = useRef(null);
 
@@ -30,6 +33,91 @@ function App() {
       .catch(() => setUser(null))
       .finally(() => setAuthLoading(false));
   }, []);
+
+  // Load sessions when user changes
+  useEffect(() => {
+    if (!authLoading) {
+      loadSessions(true);
+    }
+  }, [user, authLoading]);
+
+  // Track if we should create a new session on first message
+  const pendingNewSessionRef = useRef(false);
+
+  const loadSessions = async (selectFirst = false) => {
+    try {
+      const data = await apiListSessions();
+      setSessions(data.sessions || []);
+      if (selectFirst && data.sessions?.length > 0 && !currentSessionId) {
+        switchSession(data.sessions[0].id);
+      }
+    } catch {
+      setSessions([]);
+    }
+  };
+
+  const switchSession = useCallback(async (sessionId) => {
+    setCurrentSessionId(sessionId);
+    pendingNewSessionRef.current = false;
+    try {
+      const data = await apiGetSession(sessionId);
+      const msgs = data.messages || [];
+      const formatted = msgs.map((m) => ({
+        id: createMessageId(),
+        role: m.role,
+        content: m.content,
+      }));
+      if (formatted.length === 0) {
+        setMessages([{
+          id: createMessageId(),
+          role: "assistant",
+          content: "Bem-vindo ao ChatLLM Lab. Como posso ajudar voce hoje?",
+        }]);
+      } else {
+        setMessages(formatted);
+      }
+    } catch {
+      setMessages([{
+        id: createMessageId(),
+        role: "assistant",
+        content: "Bem-vindo ao ChatLLM Lab. Como posso ajudar voce hoje?",
+      }]);
+    }
+  }, []);
+
+  const handleNewSession = async () => {
+    pendingNewSessionRef.current = true;
+    try {
+      const created = await apiCreateSession();
+      setCurrentSessionId(created.id);
+      setMessages([{
+        id: createMessageId(),
+        role: "assistant",
+        content: "Bem-vindo ao ChatLLM Lab. Como posso ajudar voce hoje?",
+      }]);
+      loadSessions();
+    } catch {
+      setCurrentSessionId(null);
+      setMessages([{
+        id: createMessageId(),
+        role: "assistant",
+        content: "Bem-vindo ao ChatLLM Lab. Como posso ajudar voce hoje?",
+      }]);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId, e) => {
+    e.stopPropagation();
+    try {
+      await apiDeleteSession(sessionId);
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+      }
+      loadSessions();
+    } catch {
+      // ignore
+    }
+  };
 
   const openLogin = (email) => {
     setAuthMode("login");
@@ -47,8 +135,17 @@ function App() {
     try {
       await apiLogout();
       setUser(null);
+      setSessions([]);
+      setCurrentSessionId(null);
+      setMessages([{
+        id: createMessageId(),
+        role: "assistant",
+        content: "Bem-vindo ao ChatLLM Lab. Como posso ajudar voce hoje?",
+      }]);
     } catch {
       setUser(null);
+      setSessions([]);
+      setCurrentSessionId(null);
     }
   };
 
@@ -89,6 +186,10 @@ function App() {
     if (!cleaned || busy) return;
 
     setError("");
+
+    // If no session and pending new, create one
+    let activeSessionId = currentSessionId;
+
     const userMessage = { id: createMessageId(), role: "user", content: cleaned };
     const assistantMessageId = createMessageId();
 
@@ -107,6 +208,15 @@ function App() {
         message: cleaned,
         history: chatHistory,
         signal: abortController.signal,
+        sessionId: activeSessionId,
+        onDone: (data) => {
+          if (data.session_id) {
+            setCurrentSessionId(data.session_id);
+            pendingNewSessionRef.current = false;
+            // Reload sessions to get updated list with title
+            loadSessions(false);
+          }
+        },
         onDelta: (delta) => {
           setMessages((prev) =>
             prev.map((msg) =>
@@ -159,6 +269,14 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="header-left">
+          <button
+            className="btn-sidebar-toggle"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-label={sidebarOpen ? "Fechar sidebar" : "Abrir sidebar"}
+            title={sidebarOpen ? "Fechar sidebar" : "Abrir sidebar"}
+          >
+            {sidebarOpen ? "\u2039" : "\u2630"}
+          </button>
           <span className="brand">ChatLLM Lab</span>
         </div>
         <div className="header-right">
@@ -173,29 +291,63 @@ function App() {
         </div>
       </header>
 
-      <section className="messages" aria-live="polite" ref={messagesRef}>
-        <div className="messages-inner">
-          {messages.map((msg) => (
-            <article key={msg.id} className={`bubble ${msg.role}`}>
-              <MessageContent content={msg.content} />
-            </article>
-          ))}
+      <div className="app-body">
+        {sidebarOpen && (
+          <aside className="sidebar">
+            <div className="sidebar-header">Conversas</div>
+            <button className="btn-new-session" onClick={handleNewSession}>
+              + Nova conversa
+            </button>
+            <div className="sidebar-sessions">
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className={`sidebar-item ${currentSessionId === s.id ? "active" : ""}`}
+                  onClick={() => switchSession(s.id)}
+                >
+                  <span className="sidebar-item-title">{s.title}</span>
+                  <button
+                    className="sidebar-item-delete"
+                    onClick={(e) => handleDeleteSession(s.id, e)}
+                    title="Deletar"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
+              {sessions.length === 0 && (
+                <div className="sidebar-empty">Nenhuma conversa</div>
+              )}
+            </div>
+          </aside>
+        )}
+
+        <div className="app-main">
+          <section className="messages" aria-live="polite" ref={messagesRef}>
+            <div className="messages-inner">
+              {messages.map((msg) => (
+                <article key={msg.id} className={`bubble ${msg.role}`}>
+                  <MessageContent content={msg.content} />
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <Composer
+            text={text}
+            busy={busy}
+            error={error}
+            onChangeText={setText}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+
+          <div className="warning-banner">
+            {user
+              ? `Conversas salvas na conta: ${user.username}`
+              : "Conversas n\u00e3o ser\u00e3o salvas, logue para mudar isso!"}
+          </div>
         </div>
-      </section>
-
-      <Composer
-        text={text}
-        busy={busy}
-        error={error}
-        onChangeText={setText}
-        onSubmit={onSubmit}
-        onStop={onStop}
-      />
-
-      <div className="warning-banner">
-        {user
-          ? `Conversas salvas na conta: ${user.username}`
-          : "Conversas n\u00e3o ser\u00e3o salvas, logue para mudar isso!"}
       </div>
 
       {showAuth && (

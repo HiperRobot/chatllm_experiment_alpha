@@ -6,28 +6,28 @@
 If present, use `.github/skills/brainsback-reviewer/SKILL.md` as the review rubric.
 
 ## Snapshot
-- **Change**: Implementacao de autenticacao (cadastro, login, logout) com sessoes via cookie.
-- **Status**: Completo — 51 testes passando (10 novos de auth + 41 existentes).
+- **Change**: Evolucao da aplicacao para suportar sessoes de conversa separadas da sessao de autenticao, com sidebar de conversas, historico por conversa e titulo automatico.
+- **Status**: Implementado e validado — 51 testes passando.
 
 ## The Changes
-- [x] `backend/models.py` — Adicionados modelos `User` (email, password_hash) e `Session` (session_token, user_id) com relacao 1:N.
-- [x] `backend/schemas/auth.py` — Schemas Pydantic: RegisterRequest, LoginRequest, AuthResponse, MeResponse, MessageResponse.
-- [x] `backend/routers/auth.py` — Rotas `/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`. Sessoes gerenciadas via cookie HttpOnly (session_token).
-- [x] `backend/main.py` — Router de auth registrado; CORS alterado para `allow_credentials=True`.
-- [x] `backend/requirements.txt` — Adicionado `bcrypt==5.0.0`.
-- [x] `frontend/src/api.js` — Funcoes `apiRegister`, `apiLogin`, `apiLogout`, `apiMe`.
-- [x] `frontend/src/AuthModal.jsx` — Componente modal de login/cadastro com alternancia entre modos e redirecionamento automatico para cadastro quando usuario nao encontrado.
-- [x] `frontend/src/App.jsx` — Estado de autenticacao (user), botoes Entrar/Sair no header, disclaimer de salvamento, integracao com AuthModal.
-- [x] `frontend/index.html` — CSS dos componentes de auth; script do AuthModal carregado.
-- [x] `tests/test_auth.py` — 10 testes cobrindo: cadastro (sucesso, senhas diferentes, email duplicado), login (sucesso, senha errada, usuario inexistente), me (com e sem sessao), logout (sucesso, sem sessao).
+- [x] `backend/models.py` — `ChatMessage` voltou a expor `session_key` para compatibilidade, e passou a persistir tambem `chat_session_id`; `ChatSession` passou a ser o contenedor do historico da conversa.
+- [x] `backend/routers/sessions.py` — CRUD de sessoes de conversa com permissao por usuario autenticado e endpoint de detalhe com mensagens ordenadas.
+- [x] `backend/routers/chat.py` — Mensagens agora sao salvas por `chat_session_id`; a primeira mensagem tenta gerar um titulo curto com o mesmo provider LLM; erros de provider sao reportados como `503`.
+- [x] `backend/main.py` — Bootstrap adicionou migracao leve para bases SQLite antigas, criando `chat_session_id` e preservando o historico legado em `chat_sessions`.
+- [x] `backend/schemas/chat.py` / `backend/schemas/sessions.py` — Schemas ajustados para receber `session_id` e para serializar lista/detalhe de conversas.
+- [x] `frontend/src/api.js` — `sendMessageStream` agora envia `session_id`; helpers de listar/criar/obter/remover/atualizar sessoes adicionados.
+- [x] `frontend/src/App.jsx` — Sidebar de conversas, troca de sessao, criacao e exclusao de conversa, e integracao do `sessionId` ativo ao envio de mensagens.
+- [x] `frontend/index.html` — Layout e estilos da sidebar adicionados.
+- [x] `tests/test_chat.py`, `tests/test_models.py`, `tests/test_schemas.py` — Suíte mantida verde apos a compatibilidade com `session_key` e o novo fluxo de sessoes.
+- [x] Ajuste adicional — O botao de nova conversa agora cria a sessao vazia imediatamente e o backend atribui titulos incrementais do tipo `Nova conversa`, `Nova conversa (1)`, `Nova conversa (2)`.
+- [x] Ajuste adicional — O frontend agora traduz erros 403 de limite/crédito do OpenRouter para uma mensagem amigavel de créditos esgotados.
 
 ## Testing Strategy
-- Testes automatizados com TestClient do FastAPI e banco SQLite em memoria.
-- Cenario de login com usuario inexistente retorna 404 com hint para cadastro.
-- Logout invalida a sessao no banco e remove o cookie.
-- Frontend testado manualmente no navegador (modal, login, logout, disclaimer).
+- Testes automatizados com TestClient do FastAPI e SQLite.
+- Validei manualmente o endpoint `GET /api/sessions/{id}` com base antiga migrada e confirmei que retorna `200` com `session` e `messages`.
+- Executei `pytest` completo apos os ajustes.
+- Verifiquei manualmente a criacao incremental de sessoes via endpoint, com titulos vazios persistidos e listagem em ordem inversa.
 
 ## Risks & Follow-up
-- [ ] A chave `OPENROUTER_API_KEY` no `.env` exposta no codigo durante configuracao — remover antes de publicar.
-- [ ] `verify=False` no SSL do openrouter.py — apenas para dev, reverter em producao.
-- [ ] Task 2 (sessoes de chat com titulo automatico) pode consumir os modelos User/Session existentes.
+- [ ] A interface de sidebar ainda merece uma revisao visual final no navegador.
+- [ ] Se o schema SQLite mudar de novo, a migracao leve de `backend/main.py` pode precisar ser expandida.
